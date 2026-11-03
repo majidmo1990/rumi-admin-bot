@@ -33,11 +33,17 @@ def ask_ai(user_text):
             timeout=60,
         )
         data = r.json()
+
+        # --- چک کردن خطای واقعی ---
+        if "error" in data:
+            return f"خطای OpenRouter: {data['error']}"
+        if "choices" not in data or not data["choices"]:
+            return f"پاسخ نامعتبر: {data}"
+
         return data["choices"][0]["message"]["content"]
     except Exception as e:
         return f"خطا در ارتباط با هوش مصنوعی: {e}"
-
-# --- وب‌سرور ساده برای Render ---
+        
 app = Flask(__name__)
 
 @app.route("/")
