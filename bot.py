@@ -7,7 +7,12 @@ import requests
 # --- تنظیمات از Environment Variables ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")
-MODEL_NAME = os.getenv("MODEL_NAME", "xingchen-agi/xing4.0-29b-a4b:free")
+# لیست مدل‌های رایگان به ترتیب اولویت (اگر یکی محدود شد، بعدی امتحان می‌شه)
+FREE_MODELS = [
+    os.getenv("MODEL_NAME", "xingchen-agi/xing4.0-29b-a4b:free"),
+    "moonshotai/kimi-k2.5:free",
+    "google/gemma-4-31b-it:free",
+]
 
 # --- ربات تلگرام ---
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -16,34 +21,47 @@ SYSTEM_PROMPT = """تو منشی شخصی من هستی. کوتاه، مودب �
 اگر کاربر گفت یادآور بذار، بگو 'ثبت شد' و جزئیات رو تکرار کن."""
 
 def ask_ai(user_text):
-    try:
-        r = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": MODEL_NAME,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_text},
-                ],
-            },
-            timeout=60,
-        )
-        data = r.json()
+    last_error = None
+    for model in FREE_MODELS:
+        try:
+            r = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_text},
+                    ],
+                },
+                timeout=60,
+            )
+            data = r.json()
 
-        # --- چک کردن خطای واقعی ---
-        if "error" in data:
-            return f"خطای OpenRouter: {data['error']}"
-        if "choices" not in data or not data["choices"]:
-            return f"پاسخ نامعتبر: {data}"
+            # اگر خطا داشت
+            if "error" in data:
+                err_code = data["error"].get("code")
+                last_error = f"[{model}] {data['error']}"
+                # اگر 429 یا خطای موقت بود، برو مدل بعدی
+                if err_code in (429, 503, 502):
+                    continue
+                # خطای جدی (مثل 401) → برگردون
+                return f"خطای OpenRouter: {data['error']}"
 
-        return data["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f"خطا در ارتباط با هوش مصنوعی: {e}"
-        
+            if "choices" not in data or not data["choices"]:
+                last_error = f"[{model}] پاسخ نامعتبر: {data}"
+                continue
+
+            return data["choices"][0]["message"]["content"]
+
+        except Exception as e:
+            last_error = f"[{model}] {e}"
+            continue
+
+    return f"همه مدل‌ها در دسترس نیستن. آخرین خطا:\n{last_error}"
 app = Flask(__name__)
 
 @app.route("/")
