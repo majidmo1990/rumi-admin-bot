@@ -2,21 +2,40 @@ import os
 import threading
 from flask import Flask
 import telebot
-import google.generativeai as genai
+import requests
 
 # --- تنظیمات از Environment Variables ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_KEY = os.getenv("GEMINI_KEY")
+OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")
+MODEL_NAME = os.getenv("MODEL_NAME", "xingchen-agi/xing4.0-29b-a4b:free")
 
 # --- ربات تلگرام ---
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# --- مدل هوش مصنوعی ---
-genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
-
-SYSTEM_PROMPT = """تو منشی شخصی من هستی. کوتاه، مودب و کاربردی جواب بده.
+SYSTEM_PROMPT = """تو منشی شخصی من هستی. کوتاه، مودب و کاربردی به فارسی جواب بده.
 اگر کاربر گفت یادآور بذار، بگو 'ثبت شد' و جزئیات رو تکرار کن."""
+
+def ask_ai(user_text):
+    try:
+        r = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": MODEL_NAME,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_text},
+                ],
+            },
+            timeout=60,
+        )
+        data = r.json()
+        return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"خطا در ارتباط با هوش مصنوعی: {e}"
 
 # --- وب‌سرور ساده برای Render ---
 app = Flask(__name__)
@@ -36,11 +55,7 @@ def start(msg):
 
 @bot.message_handler(func=lambda m: True)
 def handle(msg):
-    try:
-        resp = model.generate_content(f"{SYSTEM_PROMPT}\n\nکاربر: {msg.text}")
-        bot.reply_to(msg, resp.text)
-    except Exception as e:
-        bot.reply_to(msg, f"خطا: {e}")
+    bot.reply_to(msg, ask_ai(msg.text))
 
 # --- اجرای همزمان وب‌سرور و ربات ---
 if __name__ == "__main__":
